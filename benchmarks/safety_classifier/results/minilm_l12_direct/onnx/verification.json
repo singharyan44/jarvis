@@ -1,0 +1,11 @@
+{
+  "matches": 0,
+  "total": 3,
+  "max_logit_diff": 0.04112125188112259,
+  "max_prob_diff": 0.007170885801315308,
+  "details": [
+    {
+      "input": "intent: list files [SEP] tool: terminal [SEP] shell: bash [SEP] command: ls [SEP] context: cwd: /wor",
+      "logit_diff": 0.04112125188112259,
+      "prob_diff": 0.006691083312034607,
+      "match": 

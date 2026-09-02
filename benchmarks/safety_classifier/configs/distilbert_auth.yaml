@@ -1,0 +1,50 @@
+model:
+  name: distilbert-base-uncased
+  type: authorization
+  num_labels: 4
+  label2id:
+    ALLOW: 0
+    CONFIRM: 1
+    DENY: 2
+    UNCERTAIN: 3
+  id2label:
+    '0': ALLOW
+    '1': CONFIRM
+    '2': DENY
+    '3': UNCERTAIN
+lora:
+  enabled: true
+  r: 16
+  alpha: 32
+  dropout: 0.1
+  target_modules:
+  - q_lin
+  - v_lin
+  - k_lin
+  - out_lin
+training:
+  epochs: 5
+  batch_size: 8
+  learning_rate: 2e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.1
+  max_grad_norm: 1.0
+  fp16: false
+  gradient_accumulation_steps: 2
+  eval_steps: 500
+  save_steps: 500
+  logging_steps: 100
+  early_stopping_patience: 3
+  early_stopping_threshold: 0.001
+  metric_for_best_model: fnr_deny
+data:
+  max_length: 512
+  train_file: data/train.jsonl
+  val_file: data/val.jsonl
+  test_file: data/test.jsonl
+  redteam_file: data/redteam.jsonl
+  calibration_file: data/calibration.jsonl
+output:
+  dir: results/distilbert_auth
+  save_best: true
+  save_total_limit: 2

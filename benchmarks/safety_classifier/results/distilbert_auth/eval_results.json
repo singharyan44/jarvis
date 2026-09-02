@@ -1,0 +1,170 @@
+{
+  "model_path": "results/distilbert_auth",
+  "test_accuracy": 0.059081701553004726,
+  "test_f1_macro": 0.027892891297417916,
+  "test_f1_weighted": 0.006591837916337793,
+  "confusion_matrix": [
+    [
+      0,
+      0,
+      0,
+      2437
+    ],
+    [
+      0,
+      0,
+      0,
+      1626
+    ],
+    [
+      0,
+      0,
+      0,
+      1511
+    ],
+    [
+      0,
+      0,
+      0,
+      350
+    ]
+  ],
+  "fnr_per_class": {
+    "fnr_allow": 1.0,
+    "fnr_confirm": 1.0,
+    "fnr_deny": 1.0,
+    "fnr_uncertain": 0.0
+  },
+  "ece": 0.11529135642557918,
+  "brier_score": 0.19965073466300964,
+  "redteam": {
+    "confusion_matrix": [
+      [
+        0,
+        0,
+        0,
+        103
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1237
+      ],
+      [
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "fnr_per_class": {
+      "fnr_allow": 1.0,
+      "fnr_confirm": 0.0,
+      "fnr_deny": 1.0,
+      "fnr_uncertain": 0.0
+    },
+    "fnr_per_class_ci": {
+      "fnr_allow": {
+        "mean": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "confidence": 0.95,
+        "n_bootstrap": 1000,
+        "n_samples": 103
+      },
+      "fnr_deny": {
+        "mean": 1.0,
+        "ci_lower": 1.0,
+        "ci_upper": 1.0,
+        "confidence": 0.95,
+        "n_bootstrap": 1000,
+        "n_samples": 1237
+      }
+    },
+    "fnr_overall_ci": {
+      "mean": 1.0,
+      "ci_lower": 1.0,
+      "ci_upper": 1.0,
+      "confidence": 0.95,
+      "n_bootstrap": 1000,
+      "n_samples": 1237
+    },
+    "fnr_by_attack_family": {
+      "destructive_fs": 1.0,
+      "credential_access": 1.0,
+      "network_exfiltration": 1.0,
+      "privilege_escalation": 1.0,
+      "process_execution": 1.0,
+      "shell_injection": 1.0,
+      "interpreter_abuse": 1.0,
+      "obfuscation": 1.0,
+      "command_chaining": 1.0,
+      "nested_shells": 1.0,
+      "long_compositional": 1.0,
+      "context_dependent": 1.0
+    },
+    "fnr_by_technique": {
+      "deterministic": 1.0,
+      "unknown": 1.0,
+      "homoglyph_cyrillic": 1.0,
+      "brace_expansion_files": 1.0,
+      "alias_override": 1.0,
+      "herestring": 1.0,
+      "symlink_traversal": 1.0,
+      "exec_redirection": 1.0,
+      "arithmetic_assignment": 1.0,
+      "debug_trap": 1.0,
+      "homoglyph_zwj": 1.0,
+      "history_expansion": 1.0,
+      "base64_payload": 1.0,
+      "process_substitution": 1.0,
+      "brace_expansion_commands": 1.0,
+      "parameter_expansion_substitution": 1.0,
+      "ifs_manipulation": 1.0,
+      "bash_env": 1.0,
+      "coprocess_exfiltration": 1.0,
+      "conditional_execution": 1.0,
+      "parameter_expansion_path_traversal": 1.0,
+      "homoglyph_diacritic": 1.0,
+      "arithmetic_expansion_obfuscation": 1.0,
+      "prompt_command": 1.0,
+      "homoglyph_zwj_cmd": 1.0,
+      "shell_difference_zsh": 1.0,
+      "heredoc": 1.0,
+      "env_file": 1.0,
+      "loop_exfiltration": 1.0,
+      "relative_path_traversal": 1.0,
+      "shell_difference_fish": 1.0,
+      "cwd_manipulation": 1.0
+    },
+    "min_samples_check": {
+      "allow": {
+        "count": 103,
+        "meets_minimum": true,
+        "min_required": 30
+      },
+      "confirm": {
+        "count": 0,
+        "meets_minimum": false,
+        "min_required": 30
+      },
+      "deny": {
+        "count": 1237,
+        "meets_minimum": true,
+        "min_required": 30
+      },
+      "uncertain": {
+        "count": 0,
+        "meets_minimum": false,
+        "min_required": 30
+      }
+    }
+  }
+}

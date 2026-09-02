@@ -1,0 +1,27 @@
+baselines:
+- name: toxic_bert
+  model: unitary/toxic-bert
+  type: direct
+  num_labels: 4
+  notes: Toxicity classifier adapted for safety
+- name: toxic_comment_model
+  model: martin-ha/toxic-comment-model
+  type: direct
+  num_labels: 4
+  notes: Toxic comment classifier adapted for safety
+- name: distilbert_base_uncased_frozen
+  model: distilbert-base-uncased
+  type: direct
+  num_labels: 4
+  frozen: true
+  notes: Frozen encoder, only train classifier head
+- name: minilm_l6_frozen
+  model: microsoft/MiniLM-L6-H384-uncased
+  type: direct
+  num_labels: 4
+  frozen: true
+  notes: Frozen encoder, only train classifier head
+training:
+  batch_size: 8
+  gradient_accumulation_steps: 2
+  fp16: true
