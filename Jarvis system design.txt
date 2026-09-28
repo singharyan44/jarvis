@@ -1,0 +1,152 @@
+# 🧠 JARVIS SYSTEM DESIGN (PERSONAL AI STACK)
+
+## 🎙️ 1. Speech-to-Text (STT) Layer
+
+Primary:
+- faster-whisper (offline, accurate, moderate speed)
+
+Fallback:
+- Vosk (offline, lightweight, fast, lower accuracy)
+
+Purpose:
+- Convert voice input into raw text commands
+
+---
+
+## 🧹 2. WisperFlow-style Cleanup Layer
+
+Purpose:
+- Clean raw speech into structured text
+
+Functions:
+- Remove filler words (uh, um, like)
+- Fix punctuation lightly
+- Improve readability
+- Add slight processing delay for “Jarvis feel”(will be obviously added due to the AI model usages)
+
+Optional enhancement:
+- Small OpenRouter model for complex command formatting
+
+---
+
+## 🧠 3. AI Intent + Processing Layer (Optional Online)
+
+Uses OpenRouter models periodically or on-demand.
+
+Tasks:
+- Convert raw usage logs into structured summaries
+- Improve commands into structured actions
+- Update system memory
+
+Runs:
+- Every ~3 days OR when triggered
+
+---
+
+## 🧠 4. Memory System (Overwrite-Only Design)
+
+Single file:
+
+jarvis_memory.txt
+
+Behavior:
+- Fully rewritten every AI cycle
+- No accumulation
+- Old memory replaced with updated version
+
+---
+
+## 📊 5. Logging System (Temporary)
+
+File:
+
+logs/raw_session.jsonl
+
+Stores:
+- TTS usage
+- AI calls
+- command triggers
+- latency
+- success/failure
+
+Deleted after summarization cycle.
+
+---
+
+## 🗣️ 6. Text-to-Speech (TTS) Multi-Layer System
+
+Priority order:
+
+1. ElevenLabs (primary, highest quality)
+2. Azure TTS (fallback)
+3. Google TTS (backup fallback)
+4. Coqui TTS (offline neural fallback)
+5. pyttsx3 (last-resort offline fallback)
+
+---
+
+## ⚙️ 7. Command Execution Layer
+
+Responsible for:
+- opening apps
+- browser automation
+- Spotify control
+- system actions
+
+Triggered from structured intent output.
+
+---
+
+## ⏱️ 8. Aesthetic Delay System
+
+Purpose:
+- Simulate “thinking”
+- Improve natural assistant feel
+
+Delay range:
+- 0.3s – 1.2s depending on action
+
+---
+
+## 🔌 9. Offline Mode Behavior
+
+When internet is unavailable:
+
+- No OpenRouter calls
+- No cloud TTS APIs
+- No external AI formatting
+
+Only:
+- faster-whisper / Vosk
+- rule-based text cleanup
+- offline TTS (pyttsx3 / Coqui)
+- local command execution
+
+---
+
+## 🧠 FINAL PIPELINE FLOW
+
+MIC
+  ↓
+Speech-to-Text (faster-whisper / Vosk)
+  ↓
+WhisperFlow Cleaner (rule-based)
+  ↓
+Optional AI Formatter (OpenRouter if online)
+  ↓
+Command Router
+  ↓
+Execution Layer
+  ↓
+TTS System (multi-layer fallback)
+
+---
+
+## 💡 CORE DESIGN IDEA
+
+This system is:
+- lightweight
+- modular
+- offline-capable
+- AI-enhanced when internet is available
+- designed for low maintenance use

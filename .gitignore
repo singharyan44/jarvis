@@ -1,0 +1,10 @@
+.env
+.cache/
+node_modules
+benchmarks/
+honcho/
+__pycache__/
+*.pyc
+.pytest_cache/
+models/
+logs/*.jsonl

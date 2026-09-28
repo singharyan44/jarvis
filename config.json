@@ -1,0 +1,74 @@
+{
+  "vosk": {
+    "model_size": "small",
+    "auto_download": true,
+    "sample_rate": 16000
+  },
+  "wake_word": {
+    "enabled": true,
+    "phrases": ["hey jarvis", "jarvis"],
+    "sensitivity": 0.5,
+    "cooldown": 2.0
+  },
+  "whisper": {
+    "device": "auto",
+    "compute_type": "default",
+    "model_size": "distil-large-v3"
+  },
+  "tts": {
+    "preference_order": ["elevenlabs", "azure", "google", "coqui", "pyttsx3"],
+    "welcome_enabled": true,
+    "welcome_phrase": "Welcome home sir. ",
+    "welcome_cache_enabled": true
+  },
+  "openrouter": {
+    "base_url": "https://openrouter.ai/api/v1",
+    "timeout": 10.0,
+    "temperature": 0.1,
+    "max_tokens": 500
+  },
+  "offline_mode": "auto",
+  "local_llm": {
+    "ollama_base_url": "http://localhost:11434",
+    "ollama_model": "llama3.1:8b",
+    "lm_studio_base_url": "http://localhost:1234",
+    "lm_studio_model": ""
+  },
+  "audio": {
+    "sample_rate": 44100,
+    "block_ms": 40,
+    "channels": 1
+  },
+  "vad": {
+    "silence_threshold_rms": 0.008,
+    "silence_duration_s": 0.8,
+    "min_recording_s": 1.0,
+    "max_recording_s": 30.0,
+    "padding_s": 0.3
+  },
+  "clap_detection": {
+    "spike_ratio": 7.0,
+    "cooldown_s": 0.45,
+    "min_double_gap_s": 0.05,
+    "max_double_gap_s": 0.35,
+    "retrigger_ratio": 0.55,
+    "noise_floor_alpha": 0.992,
+    "min_rms": 0.012,
+    "quiet_gate_mult": 2.2
+  },
+  "media": {
+    "song_uri": "https://open.spotify.com/track/39shmbIHICJ2Wxnk1fPSdz?si=2900c75c2e2d4b82"
+  },
+  "cursor": {
+    "focus_existing": false,
+    "open_new": false,
+    "fullscreen": false
+  },
+  "honcho": {
+    "api_url": "http://localhost:8000",
+    "workspace": "jarvis",
+    "enabled": true
+  },
+  "transcription_silence_rms": 0.0015,
+  "quiet_gate_mult": 2.2
+}

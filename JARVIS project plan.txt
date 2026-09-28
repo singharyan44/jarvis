@@ -1,0 +1,596 @@
+# 🧠 JARVIS Development Roadmap
+
+## Current Status
+
+Already implemented:
+
+- ✅ Double clap activation
+- ✅ Microphone input
+- ✅ faster-whisper STT foundation
+- ✅ ElevenLabs TTS foundation
+- ✅ pyttsx3 fallback
+- ✅ Spotify launching
+- ✅ Browser automation
+- ✅ Cursor launching
+- ✅ `.env` configuration
+- ✅ Basic logging
+- ✅ Threaded action execution
+
+Main goal:
+
+Transform the current prototype into a modular, offline-capable personal AI assistant.
+
+---
+
+# Phase 0 — Refactor Current Prototype
+
+## Goal
+
+Prevent the assistant from becoming one massive Python file.
+
+## Target Structure
+
+```text
+jarvis/
+
+├── main.py
+
+├── audio/
+│   ├── clap.py
+│   └── microphone.py
+
+├── stt/
+│   ├── whisper.py
+│   └── vosk.py
+
+├── cleanup/
+│   └── cleaner.py
+
+├── tts/
+│   ├── manager.py
+│   ├── elevenlabs.py
+│   ├── azure.py
+│   ├── google.py
+│   ├── coqui.py
+│   └── offline.py
+
+├── commands/
+│   ├── router.py
+│   ├── spotify.py
+│   ├── browser.py
+│   └── system.py
+
+├── memory/
+│   └── manager.py
+
+├── logs/
+│   └── logger.py
+```
+
+---
+
+# Phase 1 — Improve Voice Pipeline
+
+## Current
+
+```text
+Double clap
+    ↓
+Record fixed duration
+    ↓
+Whisper
+```
+
+## Target
+
+```text
+Double clap
+    ↓
+Listen until silence
+    ↓
+Stop recording
+    ↓
+Whisper
+```
+
+Benefits:
+
+- Natural speech length
+- No cut-off commands
+- Better assistant experience
+
+---
+
+# Phase 2 — Speech Cleanup Layer
+
+Create:
+
+```text
+cleanup/
+
+└── cleaner.py
+```
+
+Purpose:
+
+Convert raw STT output into cleaner text.
+
+Example:
+
+Input:
+
+```text
+uh hey jarvis can you like open spotify please
+```
+
+Output:
+
+```text
+Hey Jarvis, can you open Spotify please?
+```
+
+Handles:
+
+- filler word removal
+- punctuation
+- capitalization
+- obvious STT mistakes
+
+Does not:
+
+- change meaning
+- rewrite personality
+- force formal tone
+
+---
+
+# Phase 3 — Skill-Based Command System
+
+Replace:
+
+```python
+if "open spotify" in text:
+```
+
+With:
+
+```text
+User text
+
+↓
+
+
+Command Router
+
+↓
+
+
+Skill
+
+↓
+
+
+Action
+```
+
+Example:
+
+```text
+commands/
+
+spotify.py
+browser.py
+system.py
+cursor.py
+```
+
+Goal:
+
+New abilities can be added without modifying the core assistant.
+
+---
+
+# Phase 4 — Logging System
+
+Create:
+
+```text
+logs/
+
+└── raw_session.jsonl
+```
+
+Store:
+
+```json
+{
+  "time": "...",
+  "input": "...",
+  "action": "...",
+  "latency": 0.4,
+  "success": true
+}
+```
+
+Track:
+
+- commands
+- TTS usage
+- failures
+- AI calls
+- performance
+
+---
+
+# Phase 5 — AI Intent Layer
+
+Pipeline:
+
+```text
+Speech-to-Text
+
+↓
+
+
+Cleanup
+
+↓
+
+
+AI Intent Model
+
+↓
+
+
+Structured Output
+
+↓
+
+
+Validator
+
+↓
+
+
+Execute
+```
+
+AI responsibilities:
+
+- understand user meaning
+- decide intent
+- select tool/action
+- format response
+
+Example:
+
+User:
+
+```text
+put on some music
+```
+
+AI:
+
+```json
+{
+  "intent": "command",
+  "tool": "spotify",
+  "action": "play",
+  "response": "Playing music."
+}
+```
+
+---
+
+# Phase 6 — Validation Layer
+
+Create:
+
+```text
+validator.py
+```
+
+Purpose:
+
+AI output should never directly execute.
+
+Checks:
+
+- tool exists
+- action exists
+- parameters are valid
+- confirmation required
+
+Example:
+
+AI:
+
+```json
+{
+  "action": "shutdown"
+}
+```
+
+Validator:
+
+```text
+Requires confirmation
+```
+
+---
+
+# Phase 7 — TTS Manager
+
+Priority order:
+
+```text
+1. ElevenLabs
+2. Azure TTS
+3. Google TTS
+4. Coqui TTS
+5. pyttsx3
+```
+
+Features:
+
+- automatic fallback
+- caching
+- offline support
+
+---
+
+# Phase 8 — Offline Mode
+
+Online:
+
+```text
+faster-whisper
+
+↓
+
+
+AI formatting
+
+↓
+
+
+Cloud TTS
+
+↓
+
+
+Response
+```
+
+Offline:
+
+```text
+faster-whisper / Vosk
+
+↓
+
+
+Rule cleanup
+
+↓
+
+
+Local commands
+
+↓
+
+
+Coqui / pyttsx3
+
+↓
+
+
+Response
+```
+
+Disabled offline:
+
+- OpenRouter
+- cloud TTS
+- external AI formatting
+
+---
+
+# Phase 9 — Memory System
+
+Create:
+
+```text
+memory/
+
+└── jarvis_memory.txt
+```
+
+Design:
+
+- overwrite-only
+- no endless accumulation
+- periodic summarization
+
+Example:
+
+```text
+User preferences:
+
+- likes concise answers
+- prefers Python examples
+
+Projects:
+
+- JARVIS assistant
+```
+
+---
+
+# Phase 10 — Context Management
+
+Problem:
+
+LLM context windows are limited.
+
+Solution:
+
+```text
+User input
+
+↓
+
+
+Context Manager
+
+↓
+
+
+Relevant memory
+
+↓
+
+
+AI
+```
+
+Only send information needed for the current task.
+
+---
+
+# Phase 11 — MCP / Advanced Tools
+
+Add later:
+
+```text
+MCP
+
+├── Memory
+├── Files
+├── Browser
+├── Calendar
+└── Thinking
+```
+
+Purpose:
+
+Give the AI specialized abilities without bloating the prompt.
+
+---
+
+# Final Architecture
+
+```text
+MIC
+
+↓
+
+
+Wake Trigger
+
+↓
+
+
+Speech-to-Text
+
+↓
+
+
+Cleanup Layer
+
+↓
+
+
+Context Manager
+
+↓
+
+
+AI Intent Layer
+
+↓
+
+
+Structured Output
+
+↓
+
+
+Validator
+
+↓
+
+
+Skill Router
+
+↓
+
+
+Execution Layer
+
+↓
+
+
+TTS Manager
+
+↓
+
+
+Speaker
+```
+
+---
+
+# Development Order
+
+## Commit 1
+
+Refactor current script into modules.
+
+## Commit 2
+
+Add listen-until-silence recording.
+
+## Commit 3
+
+Create cleanup layer.
+
+## Commit 4
+
+Create skill router.
+
+## Commit 5
+
+Add JSONL session logging.
+
+## Commit 6
+
+Add AI intent routing.
+
+## Commit 7
+
+Add validation layer.
+
+## Commit 8
+
+Add memory system.
+
+## Commit 9
+
+Add MCP and advanced tools.
+
+---
+
+# Core Design Principles
+
+- Local first
+- AI optional
+- Modular architecture
+- Replaceable components
+- Offline capable
+- No single point of failure
+
+The goal is not a giant AI script.
+
+The goal is a modular assistant framework that can expand with new capabilities over time.
