@@ -38,11 +38,11 @@ promote:
   default_area: "index"    # fallback area when no project match
 
 llm:
-  provider: null           # "anthropic" | "openai" (OpenAI-compatible)
-  model: null              # e.g. "claude-sonnet-4-20250514", "gpt-4o", "qwen2.5"
-  api_key_env: null        # env var name containing API key
-  api_key_cmd: null        # shell command whose stdout is the API key (tried before api_key_env)
-  base_url: null           # API base URL (null = provider default)
+  provider: "openai"         # OpenAI-compatible; points at local Ollama
+  model: "llama3.1:8b"
+  api_key_env: null
+  api_key_cmd: null
+  base_url: "http://localhost:11434/v1"
   # Examples:
   #   Anthropic:  provider: "anthropic", model: "claude-sonnet-4-20250514", api_key_env: "ANTHROPIC_API_KEY"
   #   OpenAI:     provider: "openai", model: "gpt-4o", api_key_env: "OPENAI_API_KEY"
