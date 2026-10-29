@@ -101,6 +101,10 @@ class ToolRequest:
 class ONNXModel:
     """Wrapper for ONNX model inference."""
 
+    # Training-time sequence length (configs patched to 256). Longer padding
+    # does not change masked attention results, but it wastes latency 4x.
+    MAX_LENGTH = 256
+
     def __init__(self, model_path: str, tokenizer_name: str):
         if not _ORT_AVAILABLE or not _TRANSFORMERS_AVAILABLE:
             raise RuntimeError("onnxruntime and transformers required for ONNXModel")
@@ -117,15 +121,18 @@ class ONNXModel:
         self.input_names = ["input_ids", "attention_mask"]
         self.output_name = "logits"
 
-    def predict(self, text: str) -> np.ndarray:
-        """Run inference on a single text input."""
-        inputs = self.tokenizer(
-            text,
-            return_tensors="np",
+    def _encode(self, texts, return_tensors="np"):
+        return self.tokenizer(
+            texts,
+            return_tensors=return_tensors,
             padding="max_length",
-            max_length=512,
+            max_length=self.MAX_LENGTH,
             truncation=True,
         )
+
+    def predict(self, text: str) -> np.ndarray:
+        """Run inference on a single text input."""
+        inputs = self._encode(text)
         ort_inputs = {
             "input_ids": inputs["input_ids"].astype(np.int64),
             "attention_mask": inputs["attention_mask"].astype(np.int64),
@@ -135,13 +142,7 @@ class ONNXModel:
 
     def predict_batch(self, texts: list[str]) -> np.ndarray:
         """Run inference on a batch of texts."""
-        inputs = self.tokenizer(
-            texts,
-            return_tensors="np",
-            padding="max_length",
-            max_length=512,
-            truncation=True,
-        )
+        inputs = self._encode(texts)
         ort_inputs = {
             "input_ids": inputs["input_ids"].astype(np.int64),
             "attention_mask": inputs["attention_mask"].astype(np.int64),
@@ -210,19 +211,27 @@ class SafetyAnalyzer:
         # Load models (gracefully handle missing dependencies)
         self.effect_model = None
         self.auth_model = None
+        # Tokenizer must match the deployed model; prefer one shipped in the
+        # model_dir over this legacy default (which was tuned for a different
+        # base encoder and produces wrong token ids otherwise).
         self.tokenizer_name = "distilbert-base-uncased"
+        self.tokenizer_source = (
+            str(self.model_dir)
+            if (self.model_dir / "tokenizer_config.json").exists()
+            else self.tokenizer_name
+        )
 
         effect_path = self.model_dir / "effect_model.onnx"
         auth_path = self.model_dir / "auth_model.onnx"
 
         if effect_path.exists():
             try:
-                self.effect_model = ONNXModel(str(effect_path), self.tokenizer_name)
+                self.effect_model = ONNXModel(str(effect_path), self.tokenizer_source)
             except RuntimeError:
                 pass  # Dependencies not available
         if auth_path.exists():
             try:
-                self.auth_model = ONNXModel(str(auth_path), self.tokenizer_name)
+                self.auth_model = ONNXModel(str(auth_path), self.tokenizer_source)
             except RuntimeError:
                 pass
 
@@ -242,17 +251,19 @@ class SafetyAnalyzer:
         Returns SafetyDecisionResult with decision and metadata.
         """
         # 1. Parse command
-        parsed = self._parse_command(tool_request.command, tool_request.shell)
+        parse_result = self._parse_command(tool_request.command, tool_request.shell)
+        # _parse_command returns ParseResult; unwrap to the ParsedCommand.
+        parsed = parse_result.parsed if isinstance(parse_result, ParseResult) else parse_result
         tool_request.parsed = parsed
 
-        if parsed.has_errors():
+        if parsed is None or parsed.has_errors():
             return SafetyDecisionResult(
                 decision=SafetyDecision.CONFIRM,
                 confidence=0.0,
                 effects=[],
                 risk_score=1.0,
                 parsed_command=parsed,
-                explanation=f"Parse failed: {parsed.parse_errors}",
+                explanation=f"Parse failed: {parsed.parse_errors if parsed else [parse_result.error]}",
             )
 
         # 2. Extract effects
@@ -261,7 +272,7 @@ class SafetyAnalyzer:
         tool_request.risk_score = risk_score
 
         # 3. Authorization
-        decision, confidence, logits, probs = self._authorize(effects, tool_request)
+        decision, confidence, logits, probs = self._authorize(tool_request)
 
         # 4. Policy
         final_decision = self._apply_policy(decision, confidence)
@@ -289,26 +300,22 @@ class SafetyAnalyzer:
             return parse_fallback(command, shell)
 
     def _serialize_for_model(self, tool_request: ToolRequest, parsed: Optional[ParsedCommand] = None) -> str:
-        """Serialize tool request for model input."""
+        """Serialize tool request for model input.
+
+        Format must match the benchmark training data exactly
+        (SafetyDataset-style rows): intent/tool/shell/command/context joined
+        with ' [SEP] '. Parser operation and control-flow fields are NOT part
+        of the training format — including them pushes the deployed model
+        off-distribution and flattens its probabilities.
+        """
+        # Training data only contains tool: "terminal".
+        tool = "terminal" if tool_request.tool == "execute_shell" else tool_request.tool
         parts = [
             f"intent: {tool_request.intent}",
-            f"tool: {tool_request.tool}",
+            f"tool: {tool}",
             f"shell: {tool_request.shell}",
             f"command: {tool_request.command}",
         ]
-
-        if parsed and parsed.operations:
-            ops = []
-            for op in parsed.operations:
-                op_str = f"{op.type.value}:{op.target}"
-                if op.recursive:
-                    op_str += " (recursive)"
-                ops.append(op_str)
-            parts.append(f"operations: {', '.join(ops)}")
-
-            if parsed.control_flow:
-                cf = [cf.value for cf in parsed.control_flow]
-                parts.append(f"control_flow: {', '.join(cf)}")
 
         ctx = tool_request.context
         if ctx:
@@ -361,17 +368,26 @@ class SafetyAnalyzer:
 
         return list(mapped), max_risk
 
-    def _authorize(self, effects: list[str], context: dict) -> tuple[SafetyDecision, float, Optional[np.ndarray], Optional[np.ndarray]]:
-        """Run authorization model."""
+    def _authorize(self, tool_request: Any) -> tuple[SafetyDecision, float, Optional[np.ndarray], Optional[np.ndarray]]:
+        """Run authorization on the actual tool request."""
+        # Accept either a ToolRequest or a plain dict of request fields so the
+        # analyze() call site (and external callers) both work.
+        if isinstance(tool_request, dict):
+            tool_request = ToolRequest(
+                intent=str(tool_request.get("intent", "")),
+                tool=str(tool_request.get("tool", "")),
+                shell=str(tool_request.get("shell", "bash")),
+                command=str(tool_request.get("command", "")),
+                context=tool_request.get("context") or {},
+            )
+
         if not self.auth_model:
             # Fallback: rule-based
-            return self._fallback_authorize(effects, context)
+            return self._fallback_authorize(tool_request.effects or [], tool_request.context)
 
-        # Serialize for auth model
-        # Build a synthetic tool request for serialization
-        tool_request = ToolRequest(
-            intent="", tool="", shell="bash", command="", context=context
-        )
+        # Serialize for auth model — the REAL request, including the command
+        # text. (Previously this re-serialized an empty request, so the model
+        # never saw the command it was judging.)
         text = self._serialize_for_model(tool_request)
 
         logits = self.auth_model.predict(text)
@@ -493,8 +509,10 @@ def get_safety_analyzer(model_dir: str = None, parser_shell: str = "bash") -> Sa
     global _safety_analyzer
     if _safety_analyzer is None:
         if model_dir is None:
-            # Default to best model from benchmark
-            model_dir = "benchmarks/safety_classifier/results/onnx/distilbert_direct"
+            model_dir = os.environ.get("JARVIS_SAFETY_MODEL_DIR", "").strip()
+        if not model_dir:
+            # Production deployment dir (see models/safety/README note in repo docs).
+            model_dir = str(Path(__file__).resolve().parents[1] / "models" / "safety")
         _safety_analyzer = SafetyAnalyzer(model_dir, parser_shell)
     return _safety_analyzer
 
