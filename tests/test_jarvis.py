@@ -8,7 +8,7 @@ from unittest import mock
 import numpy as np
 
 from core.ai_intent import AIIntentClient, IntentClassification
-from core.config import SAMPLE_RATE, WHISPER_DEVICE
+from core.config import OPENROUTER_MODEL, SAMPLE_RATE, WHISPER_DEVICE
 from core.validator import ActionValidator, ValidationResult, ConfirmationManager
 from audio.capture import record_audio, record_until_silence
 from cleanup.cleaner import clean_transcript, clean_for_intent
@@ -347,7 +347,10 @@ class JarvisTests(unittest.TestCase):
         """Test AI intent client instantiation and configuration."""
         client = AIIntentClient(api_key="")  # Explicitly empty to override config
         self.assertFalse(client.is_available())  # No API key in test env
-        self.assertEqual(client.model, "")  # Empty default - user must set in .env
+        # Model must come from config.json (an intent model is part of setup,
+        # not something left empty).
+        self.assertEqual(client.model, OPENROUTER_MODEL)
+        self.assertTrue(client.model)
         self.assertEqual(client.base_url, "https://openrouter.ai/api/v1")
         self.assertEqual(client.timeout, 10.0)
 

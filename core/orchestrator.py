@@ -8,6 +8,7 @@ This is the main application logic that coordinates all subsystems.
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 
@@ -28,6 +29,36 @@ from logs import get_session_logger, close_session_logger
 from stt.whisper_backend import WhisperSTT
 from tts.manager import TTSManager
 from memory import get_memory_manager, get_context_manager
+from core.events import EventBus
+
+
+class _PublishingTTS:
+    """TTSManager facade that mirrors spoken lines onto the UI event bus.
+
+    Presentation hook only: speak() forwards text to the event stream and then
+    delegates to the real manager, so session logging, provider fallback and
+    timing stay untouched. Every other attribute resolves through the wrapped
+    manager (preference order, provider availability, engines).
+    """
+
+    def __init__(self, tts, events: EventBus) -> None:
+        self._tts = tts
+        self._events = events
+
+    def speak(self, text: str, *args, **kwargs) -> bool:
+        self._events.publish("speak", text=text)
+        return self._tts.speak(text, *args, **kwargs)
+
+    def __getattr__(self, name: str):
+        # Only called for attributes missing on the wrapper. Delegate
+        # everything else — including privates like _get_engine (used by
+        # provider detection) — to the wrapped manager. Direct __dict__ access
+        # here prevents infinite recursion if internals are not yet set.
+        try:
+            tts = self.__dict__["_tts"]
+        except KeyError:
+            raise AttributeError(name) from None
+        return getattr(tts, name)
 
 
 class JarvisOrchestrator:
@@ -41,12 +72,23 @@ class JarvisOrchestrator:
     - Validation layer (Phase 6)
     - Text-to-speech (fallback chain)
     - Session logging (JSONL)
+
+    Optional UI event publication: when an EventBus is provided, orchestrator
+    emits perception/decision events for the presentation layer (ui/). The
+    UI never reads core state directly.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, events: "EventBus | None" = None) -> None:
         # Initialize subsystems
         self._stt = WhisperSTT()
+
+        # Optional UI event publication: wrap TTS first so every spoken line
+        # (welcome, confirmations, results) surfaces in the UI stream.
+        self._events = events
         self._tts = TTSManager()
+        if events is not None:
+            self._tts = _PublishingTTS(self._tts, events)
+
         self._commands = CommandRegistry()
         self._session_logger = get_session_logger()
         self._ai_intent = AIIntentClient()
@@ -60,12 +102,16 @@ class JarvisOrchestrator:
         self._memory = get_memory_manager()
         self._context = get_context_manager()
 
+        # Shared pending state lock: voice resolution (wake thread) and UI
+        # resolution (button thread) both consume the pending confirmation.
+        self._confirmation_lock = threading.Lock()
+
         # Session management
         self._session_id: str | None = None
 
         # Wake word detector (replaces clap detector)
         self._wake_detector = get_voice_wake_detector(on_wake=self._on_wake_word)
-        
+
         # State management to prevent re-triggering
         self._is_listening = False
         self._is_processing = False
@@ -78,6 +124,13 @@ class JarvisOrchestrator:
 
         # State
         self._running = False
+
+    def _publish(self, kind: str, **fields) -> None:
+        if self._events is not None:
+            self._events.publish(kind, **fields)
+
+    def _publish_state(self, state: str) -> None:
+        self._publish("state", state=state)
 
     def _register_commands(self) -> None:
         """Register all built-in commands."""
@@ -99,7 +152,8 @@ class JarvisOrchestrator:
         # Set state to prevent re-triggering
         self._is_listening = True
         self._is_processing = True
-        
+        self._publish_state("listening")
+
         audio_path = None
         try:
             log.info("Wake word triggered – recording audio until silence.")
@@ -107,15 +161,17 @@ class JarvisOrchestrator:
             # Lazy import to avoid circular dependency
             from audio.capture import record_until_silence
             audio_path = record_until_silence()
-            
-            # Recording done, now processing
+
+            # Recording done, now processing (STT + intent + execution)
             self._is_listening = False
-            
+            self._publish_state("thinking")
+
             start_time = time.time()
             raw_transcript = self._stt.transcribe(audio_path)
             stt_latency = time.time() - start_time
 
             log.info("Transcribed (raw): %s", raw_transcript)
+            self._publish("transcript", text=raw_transcript)
 
             # Log STT performance
             self._session_logger.log_performance(
@@ -129,6 +185,7 @@ class JarvisOrchestrator:
             transcript = clean_transcript(raw_transcript)
             if transcript != raw_transcript:
                 log.info("Transcribed (cleaned): %s", transcript)
+                self._publish("info", text=f"cleaned ▸ {transcript}")
 
             # Handle pending confirmation first
             if self._pending_confirmation:
@@ -198,6 +255,7 @@ class JarvisOrchestrator:
                         )
             else:
                 log.warning("Empty transcript – no command recognized.")
+                self._publish("info", text="heard nothing usable after STT")
                 self._session_logger.log_command(
                     transcript=raw_transcript,
                     tool="stt",
@@ -208,6 +266,7 @@ class JarvisOrchestrator:
                 )
         except Exception as e:
             log.error("Error during transcription or command processing: %s", e)
+            self._publish("error", text=str(e))
             self._session_logger.log_error(
                 error_message=str(e),
                 error_type=type(e).__name__,
@@ -223,10 +282,19 @@ class JarvisOrchestrator:
             # Reset state flags
             self._is_processing = False
             self._is_listening = False
+            if not self._pending_confirmation:
+                self._publish_state("idle")
 
     def _execute_validated_intent(self, transcript: str, validation_result, start_time: float) -> None:
         """Execute a validated intent, handling confirmation if required."""
         intent = validation_result.intent
+        self._publish(
+            "intent",
+            tool=intent.tool,
+            action=intent.action,
+            parameters=intent.parameters,
+            confidence=intent.confidence,
+        )
         
         # Check if confirmation required
         if validation_result.requires_confirmation:
@@ -246,6 +314,12 @@ class JarvisOrchestrator:
             
             # Speak the confirmation question via TTS
             log.info("Asking for confirmation: %s", ai_response)
+            self._publish(
+                "confirm_pending",
+                transcript=transcript,
+                explanation=ai_response,
+            )
+            self._publish_state("confirm")
             self._tts.speak(ai_response)
             
             # Don't reset _is_processing yet - we're waiting for confirmation
@@ -271,7 +345,14 @@ class JarvisOrchestrator:
             )
             
             safety_result = self._safety_analyzer.analyze(safety_request)
-            
+
+            self._publish(
+                "decision",
+                decision=safety_result.decision.value,
+                confidence=safety_result.confidence,
+                risk=safety_result.risk_score,
+                explanation=safety_result.explanation,
+            )
             log.info("Safety analysis: %s (confidence: %.2f, risk: %.2f) - %s",
                      safety_result.decision.value, safety_result.confidence, 
                      safety_result.risk_score, safety_result.explanation)
@@ -300,6 +381,12 @@ class JarvisOrchestrator:
                     "transcript": transcript,
                 }
                 log.info("Asking for confirmation: %s", safety_result.explanation)
+                self._publish(
+                    "confirm_pending",
+                    transcript=transcript,
+                    explanation=safety_result.explanation,
+                )
+                self._publish_state("confirm")
                 self._tts.speak(safety_result.explanation)
                 self._is_processing = True
                 self._is_listening = False
@@ -311,7 +398,8 @@ class JarvisOrchestrator:
         if cmd:
             result = cmd.execute(transcript, **intent.parameters)
             exec_latency = time.time() - start_time
-            
+            self._publish("result", success=result.success, text=result.message)
+
             self._session_logger.log_command(
                 transcript=transcript,
                 tool=intent.tool,
@@ -365,28 +453,54 @@ class JarvisOrchestrator:
         self._is_listening = False
 
     def _handle_confirmation_response(self, transcript: str, stt_latency: float) -> None:
-        """Handle user's yes/no response to a confirmation request."""
-        if not self._pending_confirmation:
-            return
-        
-        confirmation = classify_confirmation(transcript)
-        log.info("Confirmation response: %s -> %s", transcript, confirmation)
-        
-        pending = self._pending_confirmation
-        self._pending_confirmation = None
-        
+        """Handle user's yes/no response to a confirmation request (voice path)."""
+        # Consume the pending confirmation under the lock: the UI button
+        # thread may resolve it at the same moment.
+        with self._confirmation_lock:
+            if not self._pending_confirmation:
+                return
+            confirmation = classify_confirmation(transcript)
+            log.info("Confirmation response: %s -> %s", transcript, confirmation)
+            pending = self._pending_confirmation
+            self._pending_confirmation = None
+        self._finalize_confirmation(pending, confirmation)
+
+    def resolve_pending_confirmation_ui(self, approved: bool) -> None:
+        """UI control surface: approve (True) or deny (False) the pending confirmation.
+
+        Runs on a worker thread spawned by the UI (never inside the Tk
+        mainloop). No-op when nothing is pending — e.g. the user already
+        answered by voice a moment earlier.
+        """
+        with self._confirmation_lock:
+            pending = self._pending_confirmation
+            if pending is None:
+                return
+            self._pending_confirmation = None
+        log.info(
+            "UI confirmation %s for %s.%s",
+            "approved" if approved else "denied",
+            pending["intent"].tool,
+            pending["intent"].action,
+        )
+        self._finalize_confirmation(pending, "yes" if approved else "no")
+
+    def _finalize_confirmation(self, pending: dict, confirmation: str) -> None:
+        """Execute/deny/re-ask a taken pending confirmation. Lock NOT held."""
         intent = pending["intent"]
         start_time = pending["start_time"]
         original_transcript = pending["transcript"]
-        
+
         if confirmation == "yes":
             log.info("User confirmed, executing %s.%s", intent.tool, intent.action)
+            self._publish("confirm_result", outcome="approved")
             # Execute the pending command
             cmd = self._commands.get(intent.tool)
             if cmd:
                 result = cmd.execute(original_transcript, **intent.parameters)
                 exec_latency = time.time() - start_time
-                
+                self._publish("result", success=result.success, text=result.message)
+
                 self._session_logger.log_command(
                     transcript=original_transcript,
                     tool=intent.tool,
@@ -396,7 +510,7 @@ class JarvisOrchestrator:
                     message=result.message,
                     parameters=intent.parameters,
                 )
-                
+
                 if result.success:
                     log.info("Command executed: %s", result.message)
                     if "song" in original_transcript.lower() and "play" in original_transcript.lower():
@@ -415,6 +529,7 @@ class JarvisOrchestrator:
                 )
         elif confirmation == "no":
             log.info("User denied confirmation for %s.%s", intent.tool, intent.action)
+            self._publish("confirm_result", outcome="denied")
             self._tts.speak("Cancelled.")
             self._session_logger.log_command(
                 transcript=original_transcript,
@@ -425,15 +540,22 @@ class JarvisOrchestrator:
                 message="User denied confirmation",
             )
         else:
-            # Unclear response - ask again
+            # Unclear response - ask again. Re-surface the panel so the UI
+            # stays in sync with the still-pending confirmation.
             log.info("Unclear confirmation response, asking again: %s", transcript)
             self._tts.speak("I didn't understand. Please say yes or no.")
-            # Restore pending confirmation
-            self._pending_confirmation = pending
-        
+            with self._confirmation_lock:
+                self._pending_confirmation = pending
+            self._publish(
+                "confirm_pending",
+                transcript=original_transcript,
+                explanation=pending["ai_response"],
+            )
+
         # Reset state
         self._is_processing = False
         self._is_listening = False
+        self._publish_state("confirm" if self._pending_confirmation else "idle")
 
     def _classify_with_ai(self, transcript: str) -> IntentClassification | None:
         """Classify transcript using AI intent client with context from memory."""
@@ -602,17 +724,60 @@ class JarvisOrchestrator:
         self._running = False
 
 
-def main() -> None:
-    """Entry point for the application."""
-    orchestrator = JarvisOrchestrator()
+def _ui_enabled() -> bool:
+    """UI on by default; JARVIS_UI=0/false/off (or no tkinter) runs headless."""
+    raw = os.environ.get("JARVIS_UI", "").strip().lower()
+    if raw in {"0", "false", "off"}:
+        return False
     try:
-        orchestrator.run()
-    except KeyboardInterrupt:
-        log.info("Stopped by user.")
-        close_session_logger("user_interrupt")
+        import tkinter
+
+        tkinter.Tk().destroy()
+        return True
     except Exception as e:
-        log.error("Fatal error: %s", e)
-        close_session_logger("fatal_error")
-        raise
+        log.info("UI disabled (tkinter unavailable: %s)", e)
+        return False
+
+
+def main() -> None:
+    """Entry point.
+
+    UI mode (default): the Tk mainloop owns the main thread and the
+    orchestrator runs on a daemon worker; closing the window stops the core.
+    Headless mode (JARVIS_UI=0 or tkinter unavailable): the orchestrator owns
+    the main thread, as before.
+    """
+    if not _ui_enabled():
+        orchestrator = JarvisOrchestrator()
+        try:
+            orchestrator.run()
+        except KeyboardInterrupt:
+            log.info("Stopped by user.")
+            close_session_logger("user_interrupt")
+        except Exception as e:
+            log.error("Fatal error: %s", e)
+            close_session_logger("fatal_error")
+            raise
+        finally:
+            close_session_logger("normal")
+        return
+
+    events = EventBus()
+    orchestrator = JarvisOrchestrator(events=events)
+    worker = threading.Thread(target=orchestrator.run, name="jarvis-core", daemon=True)
+    worker.start()
+
+    exit_reason = "ui_closed"
+    try:
+        from ui.window import JarvisApp
+
+        app = JarvisApp()
+        log.info("UI window opened (closing it stops JARVIS)")
+        app.run(events, orchestrator)
+    except Exception as e:
+        log.error("UI error: %s", e)
+        exit_reason = "ui_error"
     finally:
-        close_session_logger("normal")
+        orchestrator.stop()
+        worker.join(timeout=5)
+        close_session_logger(exit_reason)
